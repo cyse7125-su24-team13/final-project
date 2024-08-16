@@ -1,26 +1,23 @@
+import os
 from flask import Flask, request, Response
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoModel
+from flask_cors import CORS
+from transformers import AutoTokenizer, AutoModel
 from pinecone import Pinecone
 import torch
+import requests
 import json
 
 app = Flask(__name__)
+CORS(app)
 
 # Initialize Pinecone with the correct API key and environment
 pc = Pinecone(api_key="0e0c51a7-0388-466b-bb21-1f0a3ab9392f")
 index = pc.Index("cve-index-768")
 
-# Load the BERT model and tokenizer for embeddings
 embedding_tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 embedding_model = AutoModel.from_pretrained("bert-base-uncased")
 embedding_model.eval()
 
-# Load an LLM model for refining the results
-llm_tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-llm_model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
-llm_model.eval()
-
-# Function to generate embeddings using BERT
 def generate_bert_embeddings(text):
     inputs = embedding_tokenizer(text, return_tensors="pt", truncation=True, padding=True)
     with torch.no_grad():
@@ -28,50 +25,66 @@ def generate_bert_embeddings(text):
     embeddings = outputs.last_hidden_state.mean(dim=1).squeeze().numpy()
     return embeddings.tolist()
 
-def refine_results_with_llm(query_text, pinecone_results):
-    # Prepare the LLM input format
-    inputs = [f"Query: {query_text} Context: {match['metadata']['description']}" for match in pinecone_results['matches']]
-    llm_inputs = llm_tokenizer(inputs, return_tensors="pt", padding=True, truncation=True)
+# Function to generate answers using your self-hosted model on AWS with chat history
+def generate_answer_with_self_hosted_model(query_text, context, history=[]):
+    # Set the URL to your self-hosted model API
+    url = "http://ollama.ollama.svc.cluster.local:11434/api/chat"
+    headers = {
+        "Content-Type": "application/json",
+    }
     
-    # Get relevance scores from LLM
-    with torch.no_grad():
-        outputs = llm_model(**llm_inputs)
-    relevance_scores = outputs.logits.squeeze().tolist()
+    # Construct messages with the history included
+    messages = [{"role": "user", "content": f"Context: {context}\n\n"}]
+    messages.extend(history)  # Include past conversation history
+    
+    # Add the new query to the messages
+    messages.append({"role": "user", "content": f"Question: {query_text}"})
+    
+    data = {
+        "model": "llama3.1:8b",
+        "messages": messages,
+        "stream": False,
+        "temperature": 0.7
+    }
+    
+    response = requests.post(url, headers=headers, json=data)
+    
+    if response.status_code == 200:
+        answer = response.json()["message"]["content"]
+        return answer.strip()
+    else:
+        raise Exception(f"Failed to generate answer: {response.status_code}, {response.text}")
 
-    # Attach relevance scores to the results
-    for i, match in enumerate(pinecone_results['matches']):
-        match['llm_score'] = relevance_scores[i]
-
-    # Sort results by LLM scores and select the top 3
-    sorted_results = sorted(pinecone_results['matches'], key=lambda x: x['llm_score'], reverse=True)[:3]
-
-    return sorted_results
-
-def convert_to_serializable(results):
-    # Convert ScoredVector objects and other non-serializable objects to dictionaries
-    serializable_results = []
-    for result in results:
-        serializable_result = {
-            'id': result['id'],
-            'cve_metadata': result['metadata']['cve_metadata'],
-            'description': result['metadata']['description'],
-            # 'llm_score': result.get('llm_score', None)
-        }
-        serializable_results.append(serializable_result)
-    return serializable_results
+# Function to aggregate the entire metadata from Pinecone results and generate an answer
+def generate_answer_for_full_metadata(query_text, pinecone_results, history=[]):
+    # Concatenate all metadata fields into a single context string
+    full_context = ""
+    for match in pinecone_results['matches']:
+        metadata = match['metadata']
+        metadata_context = " ".join([f"{key}: {value}" for key, value in metadata.items()])
+        full_context += metadata_context + " "
+    
+    # Generate a single answer using the full context
+    answer = generate_answer_with_self_hosted_model(query_text, full_context, history)
+    
+    return {
+        'context': full_context,
+        'answer': answer
+    }
 
 @app.route('/cve-chatbot/query', methods=['POST'])
 def query_pinecone():
     data = request.json
     query_text = data.get("query", "")
-    top_k = 10
+    top_k = data.get("top_k", 5)
+    history = data.get("history", [])
 
     if not query_text:
         return Response(json.dumps({"error": "Query text is required"}), status=400, mimetype='application/json')
 
     # Generate the query embedding
     query_embedding = generate_bert_embeddings(query_text)
-    
+
     # Query the Pinecone index
     pinecone_results = index.query(
         namespace="ns1",
@@ -81,19 +94,23 @@ def query_pinecone():
         include_metadata=True
     )
 
-    # Refine the results with LLM and get the top 3 ranked results
-    top_3_results = refine_results_with_llm(query_text, pinecone_results)
+    # Generate answer using the full metadata context from Pinecone results
+    result = generate_answer_for_full_metadata(query_text, pinecone_results, history)
 
-    # Handle the case where top_3_results is None
-    if top_3_results is None:
-        print("Warning: top_3_results is None")
-        return Response(json.dumps({"error": "Failed to refine results with LLM"}), status=500, mimetype='application/json')
+    if not result:
+        return Response(json.dumps({"error": "No relevant answer found"}), status=404, mimetype='application/json')
 
-    # Convert the top 3 results to a serializable format
-    serializable_results = convert_to_serializable(top_3_results)
+    # Update history with the latest question and answer
+    history.append({"role": "user", "content": f"Question: {query_text}"})
+    history.append({"role": "assistant", "content": result['answer']})
 
-    # Return the top 3 ranked results as JSON
-    return Response(json.dumps(serializable_results), status=200, mimetype='application/json')
+    # Return the answer as JSON
+    response = {
+        'query': query_text,
+        'answer': result['answer']
+    }
+
+    return Response(json.dumps(response), status=200, mimetype='application/json')
 
 @app.route('/cve-chatbot')
 def home():

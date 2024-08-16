@@ -1,0 +1,8 @@
+:80
+
+route /chat-ui* {
+    uri strip_prefix /chat-ui
+    file_server {
+        root /usr/share/caddy
+    }
+}

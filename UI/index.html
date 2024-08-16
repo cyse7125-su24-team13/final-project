@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CVE Chatbot</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #chat-container {
+            width: 400px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+        }
+
+        #messages {
+            height: 300px;
+            overflow-y: scroll;
+            margin-bottom: 10px;
+        }
+
+        .message {
+            padding: 5px 10px;
+            margin-bottom: 10px;
+            border-radius: 10px;
+        }
+
+        .user {
+            background-color: #007BFF;
+            color: white;
+            text-align: right;
+        }
+
+        .bot {
+            background-color: #f1f1f1;
+            text-align: left;
+        }
+
+        #user-input {
+            width: calc(100% - 80px);
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        #send-btn {
+            padding: 10px 20px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="chat-container">
+        <div id="messages"></div>
+        <input type="text" id="user-input" placeholder="Type a query..." />
+        <button id="send-btn">Send</button>
+    </div>
+
+    <script>
+        // Update this to the Kubernetes service URL of your Flask app
+        const apiUrl = 'https://grafana.eazydelivery.in/cve-chatbot/query';
+
+        document.getElementById('send-btn').addEventListener('click', () => {
+            const userInput = document.getElementById('user-input').value;
+
+            if (userInput.trim() === '') return;
+
+            addMessage('user', userInput);
+            document.getElementById('user-input').value = '';
+
+            // Define the request body to match the expected format
+            const requestBody = {
+                query: userInput,   // The user's query text
+                top_k: 10            // Setting top_k to 5 as required
+            };
+
+            fetch(apiUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestBody)  // Convert the request body to JSON
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        addMessage('bot', `Error: ${data.error}`);
+                    } else {
+                        const answer = data.answer;  // Extract the answer from the response
+                        addMessage('bot', answer);
+                    }
+                })
+                .catch(error => {
+                    addMessage('bot', `Error: ${error.message}`);
+                });
+        });
+
+        function addMessage(sender, text) {
+            const message = document.createElement('div');
+            message.className = `message ${sender}`;
+            message.innerHTML = text;
+            document.getElementById('messages').appendChild(message);
+            document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+        }
+    </script>
+
+
+</body>
+
+</html>
