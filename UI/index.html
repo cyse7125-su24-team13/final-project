@@ -76,6 +76,9 @@
         // Update this to the Kubernetes service URL of your Flask app
         const apiUrl = 'https://grafana.eazydelivery.in/cve-chatbot/query';
 
+        // Initialize an empty history array
+        let history = [];
+
         document.getElementById('send-btn').addEventListener('click', () => {
             const userInput = document.getElementById('user-input').value;
 
@@ -84,10 +87,11 @@
             addMessage('user', userInput);
             document.getElementById('user-input').value = '';
 
-            // Define the request body to match the expected format
+            // Define the request body to match the expected format, including history
             const requestBody = {
                 query: userInput,   // The user's query text
-                top_k: 10            // Setting top_k to 5 as required
+                top_k: 10,          // Setting top_k to 10 as required
+                history: history    // Include the conversation history
             };
 
             fetch(apiUrl, {
@@ -104,6 +108,9 @@
                     } else {
                         const answer = data.answer;  // Extract the answer from the response
                         addMessage('bot', answer);
+
+                        // Update history with the response from the server
+                        history = data.history || [];
                     }
                 })
                 .catch(error => {
@@ -119,7 +126,6 @@
             document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
         }
     </script>
-
 
 </body>
 
