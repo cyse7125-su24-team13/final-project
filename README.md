@@ -1,34 +1,5 @@
-@startuml
-    node "CVE Data Extraction" as A
-    node "BERT Embedding Generation" as B
-    database "Pinecone Vector Storage (DB)" as C
-    node "Flask API Backend" as D
-    node "Self-hosted Model Interaction (Ollama Model)" as E
-    node "User Chat Interface (UI)" as F
 
-    A --> B : Extracted Data (CVE Descriptions)
-    B --> C : Generated Embeddings
-    C --> D : Store and Retrieve Embeddings
-    F --> D : User Queries
-    D --> E : Forward API Requests
-    E --> C : Query for Similar CVEs
-    E --> D : Return Processed Results
-
-    package "Kubernetes Deployment" {
-        node "Docker Container - Chat UI Frontend" as H
-        node "Docker Container - Ollama Model Server" as I
-        node "Docker Container - Flask API Backend" as G
-        
-        G --> D
-        H --> F : Hosts Chat UI
-        I --> E : Hosts Ollama Model
-    }
-
-    F --> H : User Interactions (Queries and Responses)
-    D --> G : API Logic Execution
-    E --> I : Model Processing
-@enduml
-
+![alt text](image.png)
 
 ### Explanation of Components:
 
@@ -62,8 +33,3 @@
 - **Model Interaction:** If needed, the query is forwarded to the Ollama Model Server for deeper processing. The Ollama model can use the embeddings or additional data to refine the response.
 - **Response Generation:** The processed results are sent back through the Flask API to the Chat UI, where the user sees the final response.
 
-### How to Use This Diagram:
-
-- **PlantUML Rendering:** You can use this PlantUML code in any editor that supports PlantUML to render a detailed flowchart. This diagram provides a comprehensive overview of how the different components in your system interact, including the roles of the Ollama Model Server, Flask API, Chat UI, and the Pinecone vector database.
-
-This diagram is detailed enough to serve as a blueprint for understanding and explaining the architecture of your CVE Search Application.
