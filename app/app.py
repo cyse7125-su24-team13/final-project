@@ -107,7 +107,8 @@ def query_pinecone():
     # Return the answer as JSON
     response = {
         'query': query_text,
-        'answer': result['answer']
+        'answer': result['answer'],
+        'history': history  # Return updated history
     }
 
     return Response(json.dumps(response), status=200, mimetype='application/json')
